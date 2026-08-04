@@ -10,8 +10,11 @@ import (
 // json structs
 
 type Message struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role    string          `json:"role"`
+	Content json.RawMessage `json:"content"` // content block goes here
+
+	TextContent  string         `json:"-"` // when just a string
+	ParsedBlocks []ContentBlock `json:"-"` // when an array
 }
 
 type Tool struct {
@@ -31,6 +34,16 @@ type Property struct {
 	Description string `json:"description"`
 }
 
+type ContentBlock struct {
+	Type      string          `json:"type"`
+	Text      string          `json:"text,omitempty"`
+	Content   string          `json:"content,omitempty"`
+	ToolUseID string          `json:"tool_use_id,omitempty"`
+	ID        string          `json:"id,omitempty"`
+	Name      string          `json:"name,omitempty"`
+	Input     json.RawMessage `json:"input,omitempty"`
+}
+
 type Req struct {
 	Model      string    `json:"model"`
 	Max_tokens int       `json:"max_tokens"`
@@ -39,25 +52,56 @@ type Req struct {
 	Tools      []Tool    `json:"tools"`
 }
 
+func decodeRequest(req *Req, r *http.Request) error {
+
+	err := json.NewDecoder(r.Body).Decode(req)
+	if err != nil {
+		return err
+	}
+
+	// for each message we check if content is a tool object or just a string
+	for i := range req.Messages {
+		msg := &req.Messages[i]
+
+		var textMessage string
+		if err := json.Unmarshal(msg.Content, &textMessage); err == nil {
+			msg.TextContent = textMessage
+			continue
+		}
+
+		// or
+
+		var blocks []ContentBlock
+		if err := json.Unmarshal(msg.Content, &blocks); err == nil {
+			msg.ParsedBlocks = blocks
+			continue
+		}
+		// if it didnt parsed both:
+
+		return fmt.Errorf("Failed to parse request's message content.")
+	}
+	return nil
+}
 func handleApiGateway(w http.ResponseWriter, r *http.Request) {
 
 	headerAPIkey := r.Header.Get("x-api-key")
 	userAPIkey := os.Getenv("ANTHROPIC_API_KEY")
 	if headerAPIkey != userAPIkey {
-		http.Error(w, "Invalid API key.", http.StatusBadRequest)
+		http.Error(w, "Invalid API key.", http.StatusUnauthorized)
 		return
 	}
 
 	var req Req
-	err := json.NewDecoder(r.Body).Decode(&req)
+	err := decodeRequest(&req, r)
 	if err != nil {
-		http.Error(w, "Couldnt decode", http.StatusInternalServerError)
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	fmt.Print(req.Model)
-
-	w.WriteHeader(http.StatusOK)
+	if err = json.NewEncoder(w).Encode(req); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 
 }
 
@@ -70,6 +114,8 @@ func main() {
 		Addr:    ":" + "8080",
 		Handler: mux,
 	}
+
+	fmt.Print("Server up and running on port :8080\n")
 	server.ListenAndServe()
-	fmt.Print("Server up and running on port :8080")
+
 }
