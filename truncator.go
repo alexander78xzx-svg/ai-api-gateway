@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -9,63 +8,50 @@ import (
 
 func truncateLogs(req *Req) error {
 	for i := range req.Messages {
+
+		blocks, ok := req.Messages[i].Content.([]ContentBlock) // checking if conent is a slice of contentblocks
+		if !ok || len(blocks) == 0 {
+			continue
+		}
+
 		// we search for the tool output made by the user role
-		if req.Messages[i].Role == "user" && len(req.Messages[i].ParsedBlocks) > 0 {
+		if req.Messages[i].Role == "user" {
 
 			// we check if the message is older than n turns
 			if len(req.Messages) > 4 && i < len(req.Messages)-4 {
 
-				for j := range req.Messages[i].ParsedBlocks {
-					if req.Messages[i].ParsedBlocks[j].Type != "tool_result" {
+				for j := range blocks {
+					if blocks[j].Type != "tool_result" {
 						continue
 					}
 
 					// check if tool result is a string
-					trim := bytes.TrimSpace(req.Messages[i].ParsedBlocks[j].Content)
-					if len(trim) == 0 {
-						continue
-					}
-					switch trim[0] {
-					case '"':
-						var s string
-						if err := json.Unmarshal(req.Messages[i].ParsedBlocks[j].Content, &s); err != nil {
+
+					switch content := blocks[j].Content.(type) {
+					case string:
+						if len(strings.TrimSpace(content)) == 0 {
 							continue
 						}
 
-						s = fmt.Sprintf("Stubbed output, %d chars removed", len(s))
-						t, err := json.Marshal(s)
-						if err != nil {
-							return err
-						}
+						blocks[j].Content = fmt.Sprintf("Stubbed output, %d chars removed", len(content))
 
-						req.Messages[i].ParsedBlocks[j].Content = json.RawMessage(t)
-					case '[':
-						var block []map[string]any
-						err := json.Unmarshal(trim, &block)
-						if err != nil {
-
-							// fallback, if the content is other that strings, we just count raw json bytes
-							logLen := len(trim)
-							s := fmt.Sprintf("Stubbed output, %d chars removed", logLen)
-							t, _ := json.Marshal(s)
-							req.Messages[i].ParsedBlocks[j].Content = json.RawMessage(t)
-							continue
-						}
+					case []ContentBlock:
 						var logLen int
-						for _, b := range block {
-							if text, ok := b["text"].(string); ok {
-								logLen += len(text)
+
+						for _, innerBlock := range content {
+							if innerBlock.Type == "text" {
+								logLen += len(innerBlock.Text)
+							}
+						}
+
+						// fallback
+						if logLen == 0 && len(content) > 0 {
+							if data, err := json.Marshal(content); err == nil {
+								logLen = len(data)
 							}
 						}
 						if logLen > 0 {
-							s := fmt.Sprintf("Stubbed output, %d chars removed", logLen)
-							t, err := json.Marshal(s)
-							if err != nil {
-								return err
-
-							}
-
-							req.Messages[i].ParsedBlocks[j].Content = json.RawMessage(t)
+							blocks[j].Content = fmt.Sprintf("Stubbed output, %d chars removed", logLen)
 						}
 					}
 				}
@@ -73,62 +59,41 @@ func truncateLogs(req *Req) error {
 				// message isnt older than n turns (needs to be preserved)
 
 				// each parsed block:
-				for j := range req.Messages[i].ParsedBlocks {
+				for j := range blocks {
 
-					if req.Messages[i].ParsedBlocks[j].Type != "tool_result" {
+					if blocks[j].Type != "tool_result" {
 						continue
 					}
 
 					// check if tool result is a string
-					trim := bytes.TrimSpace(req.Messages[i].ParsedBlocks[j].Content)
-					if len(trim) == 0 {
-						continue
-					}
 
-					switch trim[0] {
-					case '"':
-						var s string
-						if err := json.Unmarshal(req.Messages[i].ParsedBlocks[j].Content, &s); err != nil {
+					switch content := blocks[j].Content.(type) {
+					case string:
+						if len(strings.TrimSpace(content)) == 0 {
 							continue
 						}
 
-						parts := strings.Split(s, "\n")
+						parts := strings.Split(content, "\n")
 
-						// truncate and leave only first 50 and last 100 lines, if enough lines
-						if len(parts) > 150 {
+						if len(parts) > cfg.truncateHead+cfg.truncateTail {
+							head := parts[:cfg.truncateHead]
+							tail := parts[len(parts)-cfg.truncateTail:]
+							note := fmt.Sprintf("[%d lines truncated]", len(parts)-(cfg.truncateHead+cfg.truncateTail))
 
 							var temp []string
-							head := parts[:50]
-							tail := parts[len(parts)-100:]
-							text := fmt.Sprintf("[%d lines truncated]", len(parts)-150) // add a note
-
 							temp = append(temp, head...)
-							temp = append(temp, text)
+							temp = append(temp, note)
 							temp = append(temp, tail...)
 
-							// readd an \\n at the end of each log
-							truncated := strings.Join(temp, "\n")
-
-							t, err := json.Marshal(truncated)
-							if err != nil {
-								return err
-							}
-
-							req.Messages[i].ParsedBlocks[j].Content = json.RawMessage(t)
+							blocks[j].Content = strings.Join(temp, "\n")
 						}
-					case '[':
+
+					case []ContentBlock:
 						continue
 					}
 
 				}
 			}
-
-			// we convert parsed blocks back to content
-			p, err := json.Marshal(req.Messages[i].ParsedBlocks)
-			if err != nil {
-				return err
-			}
-			req.Messages[i].Content = json.RawMessage(p)
 		}
 
 	}

@@ -15,38 +15,6 @@ var cfg = Config{
 	truncateTail: 100,
 }
 
-func decodeRequest(req *Req, r *http.Request) error {
-
-	err := json.NewDecoder(r.Body).Decode(req)
-	if err != nil {
-		return err
-	}
-
-	// for each message we check if content is a tool object or just a string
-	for i := range req.Messages {
-		msg := &req.Messages[i]
-
-		var textMessage string
-		if err := json.Unmarshal(msg.Content, &textMessage); err == nil {
-			msg.TextContent = textMessage
-			continue
-		}
-
-		// or
-
-		var blocks []ContentBlock
-		if err := json.Unmarshal(msg.Content, &blocks); err == nil {
-			msg.ParsedBlocks = blocks
-
-			continue
-		}
-		// if it didnt parsed both:
-
-		return fmt.Errorf("Failed to parse request's message content.")
-	}
-	return nil
-}
-
 func handleApiGateway(w http.ResponseWriter, r *http.Request) {
 
 	// auth

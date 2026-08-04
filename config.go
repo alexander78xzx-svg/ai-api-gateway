@@ -1,7 +1,5 @@
 package main
 
-import "encoding/json"
-
 // Core structs and the config
 
 // json structs
@@ -15,11 +13,8 @@ type Req struct {
 }
 
 type Message struct {
-	Role    string          `json:"role"`
-	Content json.RawMessage `json:"content"` // content block goes here, remains raw until the response back , we will inject one of the two next vars
-
-	TextContent  string         `json:"-"` // when just a string
-	ParsedBlocks []ContentBlock `json:"-"` // when an array
+	Role    string `json:"role"`
+	Content any    `json:"content"` // content block goes here, we will inject one of the two next vars
 }
 
 type Tool struct {
@@ -41,16 +36,13 @@ type Property struct {
 
 // req.message.content:
 type ContentBlock struct {
-	Type      string          `json:"type"`
-	Text      string          `json:"text,omitempty"`
-	Content   json.RawMessage `json:"content,omitempty"`
-	ToolUseID string          `json:"tool_use_id,omitempty"`
-	ID        string          `json:"id,omitempty"`
-	Name      string          `json:"name,omitempty"`
-	Input     json.RawMessage `json:"input,omitempty"`
-
-	ContentString string         `json:"-"` // if content is a string
-	ContentBlocks []ContentBlock `json:"-"` // if content is an array
+	Type      string         `json:"type"`
+	Text      string         `json:"text,omitempty"`
+	Content   any            `json:"content,omitempty"`
+	ToolUseID string         `json:"tool_use_id,omitempty"`
+	ID        string         `json:"id,omitempty"`
+	Name      string         `json:"name,omitempty"`
+	Input     map[string]any `json:"input,omitempty"`
 }
 
 type Config struct {
