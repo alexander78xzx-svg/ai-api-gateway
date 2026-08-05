@@ -45,6 +45,31 @@ type ContentBlock struct {
 	Input     map[string]any `json:"input,omitempty"`
 }
 
+// response structs :
+type UsageStats struct {
+	InputTokens  int `json:"input_tokens"`
+	OutputTokens int `json:"output_tokens"`
+}
+
+type ResponseContentBlock struct {
+	Type  string                 `json:"type"`
+	Text  string                 `json:"text,omitempty"`
+	ID    string                 `json:"id,omitempty"`
+	Name  string                 `json:"name,omitempty"`
+	Input map[string]interface{} `json:"input,omitempty"`
+}
+
+type APIResponse struct {
+	ID           string                 `json:"id"`
+	Type         string                 `json:"type"`
+	Role         string                 `json:"role"`
+	Model        string                 `json:"model"`
+	Content      []ResponseContentBlock `json:"content"`
+	StopReason   string                 `json:"stop_reason"`
+	StopSequence *string                `json:"stop_sequence"`
+	Usage        UsageStats             `json:"usage"`
+}
+
 type Config struct {
 	PORT string
 
