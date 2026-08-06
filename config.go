@@ -73,6 +73,8 @@ type APIResponse struct {
 type Config struct {
 	PORT string
 
+	targetURL string
+
 	userAPIkey string
 
 	stubMessage int // after how many turns we can stub the tool log message

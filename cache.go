@@ -47,6 +47,6 @@ func parseCache(hash string, m *cacheMemory) (any, error) {
 
 func (m *cacheMemory) saveCache(hash string, val any) {
 	m.mu.Lock()
-	defer m.mu.RUnlock()
+	defer m.mu.Unlock()
 	m.data[hash] = val
 }

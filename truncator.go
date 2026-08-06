@@ -3,99 +3,242 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
+	"unicode"
 )
 
-func truncateLogs(req *Req) error {
-	for i := range req.Messages {
+var (
+	codeKeywordRegex = regexp.MustCompile(`(?m)^\s*(import|export|function|func|const|let|var|class|def|return|package|if|else|struct|interface|type)\b`)
+	codeSyntaxRegex  = regexp.MustCompile(`(\{|\}|=>|:=|->|;\s*$|\[\])`)
 
-		blocks, ok := req.Messages[i].Content.([]ContentBlock) // checking if conent is a slice of contentblocks
-		if !ok || len(blocks) == 0 {
-			continue
+	errorKeywordRegex = regexp.MustCompile(`(?i)\b(error|exception|fail|failed|fatal|panic|traceback|err|undefined|cannot|unable)\b|:\d+:\d+`)
+	ansiRegexp        = regexp.MustCompile(
+		`\x1b(?:` +
+			`\[[0-?]*[ -/]*[@-~]|` +
+			`\][^\x07]*(?:\x07|\x1b\\)|` +
+			`[@-Z\\-_]` +
+			`)`,
+	)
+)
+
+func extractString(val any) (string, bool) {
+	s, ok := val.(string)
+	return strings.TrimSpace(s), ok
+}
+
+func IsJSON(input any) bool {
+	s, ok := extractString(input)
+	if !ok || s == "" {
+		return false
+	}
+	if !strings.HasPrefix(s, "{") && !strings.HasPrefix(s, "[") {
+		return false
+	}
+	return json.Valid([]byte(s))
+}
+
+func IsCode(input any) bool {
+	s, ok := extractString(input)
+	if !ok || s == "" {
+		return false
+	}
+	if strings.HasPrefix(s, "```") {
+		return true
+	}
+
+	lines := strings.Split(s, "\n")
+	if len(lines) == 0 {
+		return false
+	}
+
+	keywordMatches := 0
+	syntaxMatches := 0
+
+	for _, line := range lines {
+		if codeKeywordRegex.MatchString(line) {
+			keywordMatches++
+		}
+		if codeSyntaxRegex.MatchString(line) && !strings.HasPrefix(strings.TrimSpace(line), "[") {
+			syntaxMatches++
+		}
+	}
+
+	totalLines := len(lines)
+	return keywordMatches > 0 || (float64(syntaxMatches)/float64(totalLines)) > 0.4
+}
+
+func ShouldSkipTruncation(content any) bool {
+	return IsJSON(content) || IsCode(content)
+}
+
+// main
+func truncateLogs(req *Req) {
+	if len(req.Messages) == 0 {
+		return
+	}
+
+	// only last message
+	lastIdx := len(req.Messages) - 1
+	msg := &req.Messages[lastIdx]
+
+	switch content := msg.Content.(type) {
+	case string:
+		if !ShouldSkipTruncation(content) {
+			msg.Content = applyTruncationPipeline(content)
 		}
 
-		// we search for the tool output made by the user role
-		if req.Messages[i].Role == "user" {
+	case []ContentBlock:
 
-			// we check if the message is older than n turns
-			if len(req.Messages) > 4 && i < len(req.Messages)-4 {
-
-				for j := range blocks {
-					if blocks[j].Type != "tool_result" {
-						continue
-					}
-
-					// check if tool result is a string
-
-					switch content := blocks[j].Content.(type) {
-					case string:
-						if len(strings.TrimSpace(content)) == 0 {
-							continue
-						}
-
-						blocks[j].Content = fmt.Sprintf("Stubbed output, %d chars removed", len(content))
-
-					case []ContentBlock:
-						var logLen int
-
-						for _, innerBlock := range content {
-							if innerBlock.Type == "text" {
-								logLen += len(innerBlock.Text)
-							}
-						}
-
-						// fallback
-						if logLen == 0 && len(content) > 0 {
-							if data, err := json.Marshal(content); err == nil {
-								logLen = len(data)
-							}
-						}
-						if logLen > 0 {
-							blocks[j].Content = fmt.Sprintf("Stubbed output, %d chars removed", logLen)
-						}
-					}
-				}
-			} else {
-				// message isnt older than n turns (needs to be preserved)
-
-				// each parsed block:
-				for j := range blocks {
-
-					if blocks[j].Type != "tool_result" {
-						continue
-					}
-
-					// check if tool result is a string
-
-					switch content := blocks[j].Content.(type) {
-					case string:
-						if len(strings.TrimSpace(content)) == 0 {
-							continue
-						}
-
-						parts := strings.Split(content, "\n")
-
-						if len(parts) > cfg.truncateHead+cfg.truncateTail {
-							head := parts[:cfg.truncateHead]
-							tail := parts[len(parts)-cfg.truncateTail:]
-							note := fmt.Sprintf("[%d lines truncated]", len(parts)-(cfg.truncateHead+cfg.truncateTail))
-
-							var temp []string
-							temp = append(temp, head...)
-							temp = append(temp, note)
-							temp = append(temp, tail...)
-
-							blocks[j].Content = strings.Join(temp, "\n")
-						}
-
-					case []ContentBlock:
-						continue
-					}
-
+		for i := range content {
+			if blockText, ok := content[i].Content.(string); ok {
+				if !ShouldSkipTruncation(blockText) {
+					content[i].Content = applyTruncationPipeline(blockText)
 				}
 			}
 		}
-
 	}
-	return nil
+}
+
+// helper funcs for pipeline
+
+func cleanCharacters(s string) string {
+	if s == "" {
+		return ""
+	}
+
+	s = ansiRegexp.ReplaceAllString(s, "")
+
+	var b strings.Builder
+	b.Grow(len(s))
+
+	lines := strings.Split(s, "\n")
+	prevBlank := false
+	writtenLines := 0
+
+	for _, line := range lines {
+		//clean trailing returns and whitespace
+		line = strings.TrimRight(line, " \t\r")
+
+		// remove spinners
+		var lineBuilder strings.Builder
+		lineBuilder.Grow(len(line))
+
+		for _, r := range line {
+			if r == '\b' || unicode.Is(unicode.Braille, r) {
+				continue
+			}
+			switch r {
+			case '◐', '◓', '◑', '◒', '◴', '◷', '◶', '◵', '○', '●',
+				'◜', '◝', '◞', '◟', '◠', '◡', '◢', '◣', '◤', '◥',
+				'▖', '▘', '▝', '▗', '▌', '▀', '▄', '█', '■', '□':
+				continue
+			}
+
+			if unicode.IsPrint(r) || r == '\t' {
+				lineBuilder.WriteRune(r)
+			}
+		}
+
+		cleanedLine := lineBuilder.String()
+		isBlank := strings.TrimSpace(cleanedLine) == ""
+
+		// collapse repeating blank lines
+		if isBlank {
+			if prevBlank {
+				continue
+			}
+			prevBlank = true
+		} else {
+			prevBlank = false
+		}
+
+		if writtenLines > 0 {
+			b.WriteRune('\n')
+		}
+		b.WriteString(cleanedLine)
+		writtenLines++
+	}
+
+	// remove trailing newline, blank space
+	out := strings.TrimRight(b.String(), "\n\t ")
+	return out
+}
+
+func headTailTruncate(s string, headLines, tailLines, windowSize int) string {
+	lines := strings.Split(s, "\n")
+	total := len(lines)
+
+	if total <= (headLines + tailLines) {
+		return s
+	}
+
+	keep := make(map[int]bool)
+
+	for i := 0; i < headLines && i < total; i++ {
+		keep[i] = true
+	}
+
+	for i := total - tailLines; i < total; i++ {
+		if i >= 0 {
+			keep[i] = true
+		}
+	}
+
+	for i := headLines; i < total-tailLines; i++ {
+		if errorKeywordRegex.MatchString(lines[i]) {
+
+			start := i - windowSize
+			if start < 0 {
+				start = 0
+			}
+			end := i + windowSize
+			if end >= total {
+				end = total - 1
+			}
+
+			for j := start; j <= end; j++ {
+				keep[j] = true
+			}
+		}
+	}
+
+	var b strings.Builder
+	omitting := false
+	omittedCount := 0
+
+	for i := 0; i < total; i++ {
+		if keep[i] {
+			if omitting {
+				b.WriteString(fmt.Sprintf("\n[... %d lines omitted]\n", omittedCount))
+				omitting = false
+				omittedCount = 0
+			}
+			if b.Len() > 0 {
+				b.WriteRune('\n')
+			}
+			b.WriteString(lines[i])
+		} else {
+			omitting = true
+			omittedCount++
+		}
+	}
+
+	if omitting {
+		b.WriteString(fmt.Sprintf("\n[... %d lines omitted]", omittedCount))
+	}
+
+	return b.String()
+}
+
+// pipeline :
+func applyTruncationPipeline(logText string) string {
+	// tier 1:
+	logText = cleanCharacters(logText)
+
+	// tier 2:
+
+	logText = headTailTruncate(logText, 20, 50, 3)
+
+	return logText
 }

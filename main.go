@@ -1,29 +1,22 @@
 package main
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
 )
 
-var cfg = Config{
-	PORT:         "8080",
-	userAPIkey:   os.Getenv("ANTHROPIC_API_KEY"),
-	stubMessage:  4,
-	truncateHead: 50,
-	truncateTail: 100,
-}
+var cfg Config
 
 var cache = newCacheMemory()
 
 func handleApiGateway(w http.ResponseWriter, r *http.Request) {
 
 	// auth
-	headerAPIkey := r.Header.Get("x-api-key")
-	userAPIkey := os.Getenv("ANTHROPIC_API_KEY")
-	if headerAPIkey != userAPIkey {
+	headerAPIkey := strings.TrimSpace(r.Header.Get("x-api-key"))
+	if headerAPIkey != cfg.userAPIkey {
 		http.Error(w, "Invalid API key.", http.StatusUnauthorized)
 		return
 	}
@@ -35,6 +28,7 @@ func handleApiGateway(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+
 	// Exact cache
 	hash, err := hashRequest(&req)
 	if err != nil {
@@ -48,60 +42,74 @@ func handleApiGateway(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
+		fmt.Println("CACHE HIT!")
 		return
 
 	}
 
 	// truncate
-	if err = truncateLogs(&req); err != nil {
+	truncateLogs(&req)
+
+	if err := json.NewEncoder(w).Encode(req); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-
 	// send data and save the cache
 
-	bodyBytes, err := json.Marshal(req)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
+	/*
+		bodyBytes, err := json.Marshal(req)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
 
-	request, err := http.NewRequest("POST", "https://api.anthropic.com/v1/messages", bytes.NewBuffer(bodyBytes))
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
+		request, err := http.NewRequest("POST", cfg.targetURL, bytes.NewBuffer(bodyBytes))
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
 
-	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("x-api-key", cfg.userAPIkey)
-	request.Header.Set("anthropic-version", "2023-06-01")
+		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set("x-api-key", cfg.userAPIkey)
+		request.Header.Set("anthropic-version", "2023-06-01")
 
-	client := &http.Client{}
-	resp, err := client.Do(request)
+		client := &http.Client{}
+		resp, err := client.Do(request)
 
-	if err != nil {
-		http.Error(w, "Http request to the api failed", http.StatusBadGateway)
-		return
-	}
+		if err != nil {
+			http.Error(w, "Http request to the api failed", http.StatusBadGateway)
+			return
+		}
 
-	defer resp.Body.Close()
+		defer resp.Body.Close()
 
-	var apiResp APIResponse
-	if err := json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
-		http.Error(w, "Error decoding api response", http.StatusBadRequest)
-		return
-	}
+		var apiResp APIResponse
+		if err := json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
+			http.Error(w, "Error decoding api response", http.StatusBadRequest)
+			return
+		}
 
-	cache.saveCache(hash, apiResp)
 
-	if err = json.NewEncoder(w).Encode(apiResp); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
+		cache.saveCache(hash, apiResp)
+
+		if err = json.NewEncoder(w).Encode(apiResp); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+	*/
 
 }
 
 func main() {
+	cfg = Config{
+		PORT:         "8080",
+		targetURL:    "https://api.anthropic.com/v1/messages",
+		userAPIkey:   os.Getenv("ANTHROPIC_API_KEY"),
+		stubMessage:  4,
+		truncateHead: 50,
+		truncateTail: 100,
+	}
+
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("POST /v1/messages", handleApiGateway)
