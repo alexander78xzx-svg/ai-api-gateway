@@ -20,6 +20,7 @@ var (
 			`[@-Z\\-_]` +
 			`)`,
 	)
+	multiSpaceRegex = regexp.MustCompile(` {2,}`)
 )
 
 func extractString(val any) (string, bool) {
@@ -107,7 +108,12 @@ func cleanCharacters(s string) string {
 		return ""
 	}
 
+	// strip ansii patterns
 	s = ansiRegexp.ReplaceAllString(s, "")
+
+	// normalize \r\n to \n
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	s = strings.ReplaceAll(s, "\r", "\n")
 
 	var b strings.Builder
 	b.Grow(len(s))
@@ -115,12 +121,9 @@ func cleanCharacters(s string) string {
 	lines := strings.Split(s, "\n")
 	prevBlank := false
 	writtenLines := 0
+	var lastWrittenLine string
 
 	for _, line := range lines {
-		//clean trailing returns and whitespace
-		line = strings.TrimRight(line, " \t\r")
-
-		// remove spinners
 		var lineBuilder strings.Builder
 		lineBuilder.Grow(len(line))
 
@@ -140,17 +143,23 @@ func cleanCharacters(s string) string {
 			}
 		}
 
-		cleanedLine := lineBuilder.String()
-		isBlank := strings.TrimSpace(cleanedLine) == ""
+		cleanedLine := strings.Trim(lineBuilder.String(), " \t\r")
 
-		// collapse repeating blank lines
+		cleanedLine = multiSpaceRegex.ReplaceAllString(cleanedLine, " ")
+
+		isBlank := cleanedLine == ""
+
 		if isBlank {
 			if prevBlank {
 				continue
 			}
 			prevBlank = true
 		} else {
+			if cleanedLine == lastWrittenLine {
+				continue
+			}
 			prevBlank = false
+			lastWrittenLine = cleanedLine
 		}
 
 		if writtenLines > 0 {
@@ -160,9 +169,7 @@ func cleanCharacters(s string) string {
 		writtenLines++
 	}
 
-	// remove trailing newline, blank space
-	out := strings.TrimRight(b.String(), "\n\t ")
-	return out
+	return strings.TrimRight(b.String(), "\n\t ")
 }
 
 func headTailTruncate(s string, headLines, tailLines, windowSize int) string {
@@ -239,6 +246,8 @@ func applyTruncationPipeline(logText string) string {
 	// tier 2:
 
 	logText = headTailTruncate(logText, 20, 50, 3)
+
+	// tier 3:
 
 	return logText
 }
