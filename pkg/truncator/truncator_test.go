@@ -1,4 +1,4 @@
-package main
+package truncator
 
 import (
 	"fmt"

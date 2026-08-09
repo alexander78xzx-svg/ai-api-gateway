@@ -1,12 +1,14 @@
-package main
+package decoder
 
 import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+
+	"aiapigateway/pkg/config"
 )
 
-func decodeRequest(req *Req, r *http.Request) error {
+func DecodeRequest(req *config.Req, r *http.Request) error {
 	if err := json.NewDecoder(r.Body).Decode(req); err != nil {
 		return err
 	}
@@ -28,7 +30,7 @@ func decodeRequest(req *Req, r *http.Request) error {
 				return fmt.Errorf("message %d: failed to serialize content: %w", i, err)
 			}
 
-			var blocks []ContentBlock
+			var blocks []config.ContentBlock
 			if err := json.Unmarshal(bytes, &blocks); err != nil {
 				return fmt.Errorf("message %d: invalid content block array: %w", i, err)
 			}
@@ -51,7 +53,7 @@ func decodeRequest(req *Req, r *http.Request) error {
 						return fmt.Errorf("message %d block %d: failed to serialize inner content: %w", i, j, err)
 					}
 
-					var innerBlocks []ContentBlock
+					var innerBlocks []config.ContentBlock
 					if err := json.Unmarshal(innerBytes, &innerBlocks); err != nil {
 						return fmt.Errorf("message %d block %d: invalid inner content array: %w", i, j, err)
 					}

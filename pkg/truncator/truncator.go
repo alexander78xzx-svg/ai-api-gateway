@@ -1,4 +1,4 @@
-package main
+package truncator
 
 import (
 	"encoding/json"
@@ -6,6 +6,8 @@ import (
 	"regexp"
 	"strings"
 	"unicode"
+
+	"aiapigateway/pkg/config"
 )
 
 var (
@@ -74,7 +76,7 @@ func ShouldSkipTruncation(content any) bool {
 }
 
 // main
-func truncateLogs(req *Req) {
+func TruncateLogs(req *config.Req, cfg *config.Config) {
 	if len(req.Messages) == 0 {
 		return
 	}
@@ -86,15 +88,15 @@ func truncateLogs(req *Req) {
 	switch content := msg.Content.(type) {
 	case string:
 		if !ShouldSkipTruncation(content) {
-			msg.Content = applyTruncationPipeline(content)
+			msg.Content = applyTruncationPipeline(content, cfg)
 		}
 
-	case []ContentBlock:
+	case []config.ContentBlock:
 
 		for i := range content {
 			if blockText, ok := content[i].Content.(string); ok {
 				if !ShouldSkipTruncation(blockText) {
-					content[i].Content = applyTruncationPipeline(blockText)
+					content[i].Content = applyTruncationPipeline(blockText, cfg)
 				}
 			}
 		}
@@ -239,15 +241,19 @@ func headTailTruncate(s string, headLines, tailLines, windowSize int) string {
 }
 
 // pipeline :
-func applyTruncationPipeline(logText string) string {
+func applyTruncationPipeline(logText string, cfg *config.Config) string {
+
+	originalLen := len(logText)
+	if originalLen == 0 {
+		return logText
+	}
+
 	// tier 1:
 	logText = cleanCharacters(logText)
 
 	// tier 2:
 
-	logText = headTailTruncate(logText, 20, 50, 3)
-
-	// tier 3:
+	logText = headTailTruncate(logText, cfg.TruncateHead, cfg.TruncateTail, 3)
 
 	return logText
 }

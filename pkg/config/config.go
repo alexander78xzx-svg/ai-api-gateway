@@ -1,4 +1,4 @@
-package main
+package config
 
 // Core structs and the config
 
@@ -73,14 +73,15 @@ type APIResponse struct {
 type Config struct {
 	PORT string
 
-	targetURL string
+	TargetURL string
 
-	userAPIkey string
+	UserAPIkey string
 
-	stubMessage int // after how many turns we can stub the tool log message
+	StubMessage int // after how many turns we can stub the tool log message
 
-	truncateHead int // determines the first n lines that will remain after truncation
+	TruncateHead int // determines the first n lines that will remain after truncation
 
-	truncateTail int // determines the last n lines that will remain after truncation
+	TruncateTail int // determines the last n lines that will remain after truncation
 
+	CheapModel string
 }

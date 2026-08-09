@@ -6,37 +6,43 @@ import (
 	"net/http"
 	"os"
 	"strings"
+
+	"aiapigateway/pkg/cache"
+	"aiapigateway/pkg/config"
+	"aiapigateway/pkg/decoder"
+	"aiapigateway/pkg/router"
+	"aiapigateway/pkg/truncator"
 )
 
-var cfg Config
+var cfg config.Config
 
-var cache = newCacheMemory()
+var cacheMem = cache.NewCacheMemory()
 
 func handleApiGateway(w http.ResponseWriter, r *http.Request) {
 
 	// auth
 	headerAPIkey := strings.TrimSpace(r.Header.Get("x-api-key"))
-	if headerAPIkey != cfg.userAPIkey {
+	if headerAPIkey != cfg.UserAPIkey {
 		http.Error(w, "Invalid API key.", http.StatusUnauthorized)
 		return
 	}
 	// decoder
-	var req Req
+	var req config.Req
 
-	err := decodeRequest(&req, r)
+	err := decoder.DecodeRequest(&req, r)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
 	// Exact cache
-	hash, err := hashRequest(&req)
+	hash := cache.HashRequest(&req)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	res, err := parseCache(hash, cache)
+	res, err := cache.ParseCache(hash, cacheMem)
 	if err == nil {
 		if err = json.NewEncoder(w).Encode(res); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -48,12 +54,17 @@ func handleApiGateway(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// truncate
-	truncateLogs(&req)
+	truncator.TruncateLogs(&req, &cfg)
 
+	// if task is simple downgrade to a cheaper model
+	router.RouteModel(&req, &cfg)
+
+	// temp
 	if err := json.NewEncoder(w).Encode(req); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+
 	// send data and save the cache
 
 	/*
@@ -101,13 +112,14 @@ func handleApiGateway(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
-	cfg = Config{
+	cfg = config.Config{
 		PORT:         "8080",
-		targetURL:    "https://api.anthropic.com/v1/messages",
-		userAPIkey:   os.Getenv("ANTHROPIC_API_KEY"),
-		stubMessage:  4,
-		truncateHead: 50,
-		truncateTail: 100,
+		TargetURL:    "https://api.anthropic.com/v1/messages",
+		UserAPIkey:   os.Getenv("ANTHROPIC_API_KEY"),
+		StubMessage:  4,
+		TruncateHead: 50,
+		TruncateTail: 100,
+		CheapModel:   "claude-3-5-haiku-20241022",
 	}
 
 	mux := http.NewServeMux()
