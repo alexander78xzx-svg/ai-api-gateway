@@ -59,17 +59,44 @@ func handleApiGateway(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// send data and save the cache
+	// falback logic
+	rawChain := []string{req.Model, cfg.CheapModel, cfg.FallbackModel}
+	var fallbackChain []string
 
-	resp, err := stream.SendUpstreamRequest(r, &req, &cfg)
-	if err != nil || resp.StatusCode != http.StatusOK {
-		http.Error(w, err.Error(), http.StatusBadGateway)
+	seenModels := make(map[string]bool) // if req.model is already a cheap model, there is only two models in the chain so 1 retry
+	for _, model := range rawChain {
+		if !seenModels[model] {
+			fallbackChain = append(fallbackChain, model)
+			seenModels[model] = true
+		}
+	}
+
+	var resp *http.Response
+	var respErr error
+
+	for _, model := range fallbackChain {
+		req.Model = model
+
+		resp, respErr = stream.SendUpstreamRequest(r, &req, &cfg)
+
+		if respErr == nil && resp.StatusCode == http.StatusOK {
+			break
+		}
+
+		if resp != nil {
+			resp.Body.Close()
+		}
+
+	}
+
+	if respErr != nil || resp == nil || resp.StatusCode != http.StatusOK {
+		http.Error(w, "Upstream API failed after all fallbacks", http.StatusBadGateway)
 		return
 	}
+
 	defer resp.Body.Close()
 
 	w.Header().Set("X-Cache", "MISS")
-
 	fullResponseBytes, err := stream.StreamAndCache(w, resp)
 
 	if err == nil && len(fullResponseBytes) > 0 {
@@ -87,14 +114,13 @@ func main() {
 		StubMessage:   4,
 		TruncateHead:  50,
 		TruncateTail:  100,
-		CheapModel:    "claude-haiku-4-5-20251001",
-		RetryAttempts: 3,
+		CheapModel:    "claude-haiku-4-5-latest",
+		FallbackModel: "claude-sonnet-5-latest",
 	}
 
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("POST /v1/messages", handleApiGateway)
-	mux.HandleFunc("POST /v1/chat/completions", handleApiGateway)
 
 	server := &http.Server{
 		Addr:    ":" + cfg.PORT,

@@ -85,5 +85,5 @@ type Config struct {
 
 	CheapModel string
 
-	RetryAttempts int // number of retry cycles if the request isnt succesfull
+	FallbackModel string // model used at the end of the fallback chain
 }
