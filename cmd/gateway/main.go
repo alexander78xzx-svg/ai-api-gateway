@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -11,6 +10,8 @@ import (
 	"aiapigateway/pkg/config"
 	"aiapigateway/pkg/decoder"
 	"aiapigateway/pkg/router"
+	"aiapigateway/pkg/security"
+	"aiapigateway/pkg/stream"
 	"aiapigateway/pkg/truncator"
 )
 
@@ -35,23 +36,8 @@ func handleApiGateway(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Exact cache
-	hash := cache.HashRequest(&req)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	res, err := cache.ParseCache(hash, cacheMem)
-	if err == nil {
-		if err = json.NewEncoder(w).Encode(res); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		fmt.Println("CACHE HIT!")
-		return
-
-	}
+	// strip private data
+	security.RedactPayload(&req)
 
 	// truncate
 	truncator.TruncateLogs(&req, &cfg)
@@ -59,72 +45,56 @@ func handleApiGateway(w http.ResponseWriter, r *http.Request) {
 	// if task is simple downgrade to a cheaper model
 	router.RouteModel(&req, &cfg)
 
-	// temp
-	if err := json.NewEncoder(w).Encode(req); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+	// we normalized data, now comes Exact cache
+	hash := cache.HashRequest(&req)
+
+	res, err := cache.ParseCache(hash, cacheMem)
+	if err == nil {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("X-Cache", "HIT")
+		w.Write(res)
+		if flusher, ok := w.(http.Flusher); ok {
+			flusher.Flush()
+		}
 		return
 	}
 
 	// send data and save the cache
 
-	/*
-		bodyBytes, err := json.Marshal(req)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
+	resp, err := stream.SendUpstreamRequest(r, &req, &cfg)
+	if err != nil || resp.StatusCode != http.StatusOK {
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	defer resp.Body.Close()
 
-		request, err := http.NewRequest("POST", cfg.targetURL, bytes.NewBuffer(bodyBytes))
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
+	w.Header().Set("X-Cache", "MISS")
 
-		request.Header.Set("Content-Type", "application/json")
-		request.Header.Set("x-api-key", cfg.userAPIkey)
-		request.Header.Set("anthropic-version", "2023-06-01")
+	fullResponseBytes, err := stream.StreamAndCache(w, resp)
 
-		client := &http.Client{}
-		resp, err := client.Do(request)
-
-		if err != nil {
-			http.Error(w, "Http request to the api failed", http.StatusBadGateway)
-			return
-		}
-
-		defer resp.Body.Close()
-
-		var apiResp APIResponse
-		if err := json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
-			http.Error(w, "Error decoding api response", http.StatusBadRequest)
-			return
-		}
-
-
-		cache.saveCache(hash, apiResp)
-
-		if err = json.NewEncoder(w).Encode(apiResp); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-	*/
-
+	if err == nil && len(fullResponseBytes) > 0 {
+		go func(key string, data []byte) {
+			cacheMem.SaveCache(key, data)
+		}(hash, fullResponseBytes)
+	}
 }
 
 func main() {
 	cfg = config.Config{
-		PORT:         "8080",
-		TargetURL:    "https://api.anthropic.com/v1/messages",
-		UserAPIkey:   os.Getenv("ANTHROPIC_API_KEY"),
-		StubMessage:  4,
-		TruncateHead: 50,
-		TruncateTail: 100,
-		CheapModel:   "claude-3-5-haiku-20241022",
+		PORT:          "8080",
+		TargetURL:     "http://localhost:8081/v1/messages", // "https://api.anthropic.com/v1/messages"
+		UserAPIkey:    os.Getenv("ANTHROPIC_API_KEY"),
+		StubMessage:   4,
+		TruncateHead:  50,
+		TruncateTail:  100,
+		CheapModel:    "claude-haiku-4-5-20251001",
+		RetryAttempts: 3,
 	}
 
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("POST /v1/messages", handleApiGateway)
+	mux.HandleFunc("POST /v1/chat/completions", handleApiGateway)
 
 	server := &http.Server{
 		Addr:    ":" + cfg.PORT,

@@ -84,4 +84,6 @@ type Config struct {
 	TruncateTail int // determines the last n lines that will remain after truncation
 
 	CheapModel string
+
+	RetryAttempts int // number of retry cycles if the request isnt succesfull
 }

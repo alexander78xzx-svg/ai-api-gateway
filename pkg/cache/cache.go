@@ -26,12 +26,12 @@ type cacheElement struct {
 
 type cacheMemory struct {
 	mu   sync.RWMutex
-	data map[string]any
+	data map[string][]byte
 }
 
 func NewCacheMemory() *cacheMemory {
 	return &cacheMemory{
-		data: make(map[string]any),
+		data: make(map[string][]byte),
 	}
 }
 
@@ -67,7 +67,7 @@ func HashRequest(req *config.Req) string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
-func ParseCache(hash string, m *cacheMemory) (any, error) {
+func ParseCache(hash string, m *cacheMemory) ([]byte, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
@@ -75,10 +75,10 @@ func ParseCache(hash string, m *cacheMemory) (any, error) {
 	if ok {
 		return m.data[hash], nil
 	}
-	return "", fmt.Errorf("Cached response not found")
+	return []byte(""), fmt.Errorf("Cached response not found")
 }
 
-func (m *cacheMemory) SaveCache(hash string, val any) {
+func (m *cacheMemory) SaveCache(hash string, val []byte) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.data[hash] = val
