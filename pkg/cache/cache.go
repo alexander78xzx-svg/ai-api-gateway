@@ -19,19 +19,18 @@ var (
 	pidRegex  = regexp.MustCompile(`(?i)\bpid[\s:=]*\d+\b`)
 )
 
-type cacheElement struct {
-	hash     string
-	response string
-}
-
 type cacheMemory struct {
-	mu   sync.RWMutex
-	data map[string][]byte
+	mu    sync.RWMutex
+	data  map[string][]byte
+	keys  []string
+	limit int
 }
 
-func NewCacheMemory() *cacheMemory {
+func NewCacheMemory(maxItems int) *cacheMemory {
 	return &cacheMemory{
-		data: make(map[string][]byte),
+		data:  make(map[string][]byte),
+		keys:  make([]string, 0, maxItems),
+		limit: maxItems,
 	}
 }
 
@@ -71,9 +70,8 @@ func ParseCache(hash string, m *cacheMemory) ([]byte, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	_, ok := m.data[hash]
-	if ok {
-		return m.data[hash], nil
+	if val, ok := m.data[hash]; ok {
+		return val, nil
 	}
 	return []byte(""), fmt.Errorf("Cached response not found")
 }
@@ -81,5 +79,17 @@ func ParseCache(hash string, m *cacheMemory) ([]byte, error) {
 func (m *cacheMemory) SaveCache(hash string, val []byte) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
+	if _, exists := m.data[hash]; !exists {
+
+		// if over than the limit , delete the oldest
+		if len(m.keys) >= m.limit {
+			oldestKey := m.keys[0]
+			m.keys = m.keys[1:]
+			delete(m.data, oldestKey)
+		}
+
+		m.keys = append(m.keys, hash)
+	}
 	m.data[hash] = val
 }

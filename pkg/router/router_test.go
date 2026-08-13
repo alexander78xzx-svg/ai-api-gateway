@@ -9,14 +9,13 @@ import (
 )
 
 var cfg = config.Config{
-	PORT:          "8080",
-	TargetURL:     "https://api.anthropic.com/v1/messages",
-	UserAPIkey:    os.Getenv("ANTHROPIC_API_KEY"),
-	StubMessage:   4,
-	TruncateHead:  50,
-	TruncateTail:  100,
-	CheapModel:    "claude-3-5-haiku-20241022",
-	RetryAttempts: 3,
+	PORT:         "8080",
+	TargetURL:    "https://api.anthropic.com/v1/messages",
+	UserAPIkey:   os.Getenv("ANTHROPIC_API_KEY"),
+	StubMessage:  4,
+	TruncateHead: 50,
+	TruncateTail: 100,
+	CheapModel:   "claude-3-5-haiku-20241022",
 }
 
 func TestRouteModel(t *testing.T) {

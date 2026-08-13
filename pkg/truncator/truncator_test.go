@@ -1,6 +1,7 @@
 package truncator
 
 import (
+	"aiapigateway/pkg/config"
 	"fmt"
 	"strings"
 	"testing"
@@ -185,4 +186,47 @@ func BenchmarkHeadTailTruncate(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		_ = headTailTruncate(rawLog, 20, 50, 3)
 	}
+}
+
+func TestTruncateLogs(t *testing.T) {
+	var builder strings.Builder
+	builder.WriteString("Please fix this error:\nTrace:\n")
+	for i := 1; i <= 1000; i++ {
+		builder.WriteString(fmt.Sprintf("line %d: system stack trace memory dump 0x00%d\n", i, i))
+	}
+
+	req := config.Req{
+		Messages: []config.Message{
+			{Role: "user", Content: builder.String()},
+		},
+	}
+
+	cfg := config.Config{
+		TruncateHead: 50,
+		TruncateTail: 100,
+	}
+
+	originalLength := len(req.Messages[0].Content.(string))
+	originalEstimatedTokens := originalLength / 4 // Rule of thumb: 1 token ≈ 4 chars
+
+	TruncateLogs(&req, &cfg)
+
+	truncatedLength := len(req.Messages[0].Content.(string))
+	truncatedEstimatedTokens := truncatedLength / 4
+
+	if truncatedLength >= originalLength {
+		t.Errorf("Expected truncated length to be less than original. Original: %d, Truncated: %d", originalLength, truncatedLength)
+	}
+
+	if !strings.Contains(req.Messages[0].Content.(string), "omitted") {
+		t.Errorf("Expected payload to contain the truncation marker")
+	}
+
+	tokensSaved := originalEstimatedTokens - truncatedEstimatedTokens
+	costSaved := (float64(tokensSaved) / 1000000.0) * 3.00 // $3 per 1M Sonnet input tokens
+
+	t.Logf("Original Tokens: ~%d", originalEstimatedTokens)
+	t.Logf("Truncated Tokens: ~%d", truncatedEstimatedTokens)
+	t.Logf("Tokens Saved: %d", tokensSaved)
+	t.Logf("Simulated Cost Saved: $%.6f", costSaved)
 }

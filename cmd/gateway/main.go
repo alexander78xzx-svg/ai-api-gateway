@@ -17,7 +17,7 @@ import (
 
 var cfg config.Config
 
-var cacheMem = cache.NewCacheMemory()
+var cacheMem = cache.NewCacheMemory(5000)
 
 func handleApiGateway(w http.ResponseWriter, r *http.Request) {
 
@@ -109,7 +109,7 @@ func handleApiGateway(w http.ResponseWriter, r *http.Request) {
 func main() {
 	cfg = config.Config{
 		PORT:          "8080",
-		TargetURL:     "http://localhost:8081/v1/messages", // "https://api.anthropic.com/v1/messages"
+		TargetURL:     "https://api.anthropic.com/v1/messages",
 		UserAPIkey:    os.Getenv("ANTHROPIC_API_KEY"),
 		StubMessage:   4,
 		TruncateHead:  50,

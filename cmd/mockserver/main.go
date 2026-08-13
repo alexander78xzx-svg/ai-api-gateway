@@ -6,6 +6,9 @@ import (
 	"time"
 )
 
+/* this is a mock server that is used for testing to see how the gateway
+would handle response streaming */
+
 func mockAnthropicHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
